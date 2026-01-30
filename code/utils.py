@@ -8,9 +8,7 @@ import io
 import warnings
 from plotnine.exceptions import PlotnineWarning
 from scipy.stats import kruskal, levene, chi2_contingency
-#from sklearn.metrics import mean_squared_error, r2_score
-#from itertools import combinations
-#import statsmodels.api as sm
+
 
 # Plot the histogram
 def histogram_plot(data,col,color_general,color_mean,color_median,fig_size_histogram):
