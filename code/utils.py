@@ -7,6 +7,7 @@ import matplotlib.gridspec as gridspec
 import io
 import warnings
 from plotnine.exceptions import PlotnineWarning
+from scipy.stats import kruskal, levene, chi2_contingency
 #from sklearn.metrics import mean_squared_error, r2_score
 #from itertools import combinations
 #import statsmodels.api as sm
@@ -182,6 +183,255 @@ def bar_plot(data, col,color_general,fig_size,nudge_y):
     )
 
     return bar_plot
+
+
+def hist_per_target_plot(data,col,target_col,colors_per_group,fig_size):
+    data_plot = data.copy()
+    data_plot[target_col] = data_plot[target_col].astype(str)
+
+    means = (
+        data_plot
+        .groupby(target_col, as_index=False)
+        .agg(mean=(col, 'mean'))
+    )
+
+    mean_no_diabetes = means[means[target_col]=='0']['mean'].values[0]
+    mean_diabetes = means[means[target_col]=='1']['mean'].values[0]
+    
+    plot = (
+        p9.ggplot(data_plot, p9.aes(x=col, y='..density..',fill=target_col,color=target_col))
+        + p9.geom_histogram(
+            bins=50,
+            alpha=0.2,
+            position='identity',
+            show_legend = False
+        )
+        + p9.geom_vline(
+            data=means,
+            mapping=p9.aes(xintercept='mean',color=target_col),
+            linetype='dashed',
+            size=0.8,
+            show_legend = False
+        )
+        + p9.scale_y_continuous(expand=(0, 0))
+        + p9.scale_fill_manual(values=colors_per_group, labels=[0,1])
+        + p9.scale_color_manual(values=colors_per_group, labels=[0,1])
+        + p9.labs(
+            fill =target_col,
+            color=target_col,
+            title=f"Distribucion de '{col}', comparando grupos",
+            x=f'media(diabetes:0): {mean_no_diabetes:.1f}, media(diabetes:1):{mean_diabetes:.1f}',
+            y='Densidad'
+        )
+        + p9.theme(
+            panel_background=p9.element_rect(fill="#ffffff"),
+            plot_background=p9.element_rect(fill='#ffffff'),
+            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+            figure_size=fig_size,
+            axis_text_x=p9.element_text(size=7),
+            axis_text_y=p9.element_text(size=7),
+            axis_title_x=p9.element_text(size=8),
+            axis_title_y=p9.element_text(size=8),
+            plot_title=p9.element_text(size=9, weight="bold"),
+            legend_title=p9.element_text(size=8),
+            legend_text=p9.element_text(size=7),
+        )
+    )
+    
+    return plot    
+
+def box_per_target_plot(data,col,target_col,colors_per_group,fig_size_box_plot):
+    data_plot = data.copy()
+    data_plot[target_col] = data_plot[target_col].astype(str)
+
+    box_plot = (
+            p9.ggplot(data_plot, p9.aes(x=target_col ,y=col,fill=target_col,color=target_col)) +
+            p9.geom_boxplot(outlier_alpha=0.4, 
+                            alpha=0.2,
+                            width=0.5)
+            + p9.ggtitle(col)
+            + p9.scale_fill_manual(values=colors_per_group, labels=[0,1])
+            + p9.scale_color_manual(values=colors_per_group, labels=[0,1])
+            + p9.theme(
+                panel_background=p9.element_rect(fill="#ffffff"),
+                plot_background=p9.element_rect(fill='#ffffff'),
+                strip_background=p9.element_rect(fill='#ffffff'),
+                axis_ticks_major_y = p9.element_blank(),
+                axis_ticks_major_x = p9.element_blank(),
+                panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+                panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+                axis_title_y=p9.element_blank(),
+                axis_title_x=p9.element_blank(),
+                plot_title=p9.element_text(size=9, weight="bold"),
+                figure_size=fig_size_box_plot
+            )                  
+        )
+    return box_plot
+
+
+def cat_variables_per_group(data,col,col_target,colors_per_group,fig_size):
+    discrete_freq = data.groupby(col,dropna=False)[col_target].value_counts(normalize=True, dropna=False).reset_index()
+    discrete_freq[col] = discrete_freq[col].astype(str)
+    discrete_freq[col] = discrete_freq[col].fillna('Valor perdido (nan)')
+    discrete_freq['proportion'] = discrete_freq['proportion']*100
+    discrete_freq[col_target] = pd.Categorical(discrete_freq[col_target].astype(str),categories=['1','0'],ordered=True)
+    
+    plot = (
+        p9.ggplot(discrete_freq, p9.aes(x=col,y='proportion',fill=col_target,color=col_target))
+        + p9.geom_col(alpha = 0.2)
+        + p9.scale_fill_manual(values=colors_per_group, labels=['1','0'])
+        + p9.scale_color_manual(values=colors_per_group, labels=['1','0']) 
+        + p9.labs(title =f"Distribución de '{col}', comparando grupos")   
+        + p9.theme(
+            panel_background=p9.element_rect(fill="#ffffff"),
+            plot_background=p9.element_rect(fill='#ffffff'),
+            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+            figure_size=fig_size,
+            axis_text_x=p9.element_text(size=7),
+            axis_text_y=p9.element_text(size=7),
+            axis_title_x=p9.element_blank(),
+            axis_title_y=p9.element_blank(),
+            plot_title=p9.element_text(size=9, weight="bold"),
+            legend_title=p9.element_text(size=8),
+            legend_text=p9.element_text(size=7),
+        )
+    )
+    return plot
+
+def cross_tab_per_target (data,col,target_col):
+    '''
+    target_col and col must be categoricals
+    '''
+    freq = pd.crosstab(data[col], data[target_col], margins=True)
+    freq = freq.rename(columns={'All': 'Total Frecuencia'})
+
+    prop = pd.crosstab(data[col], data[target_col], normalize="index", margins=True)
+    prop['Total Porcentaje'] = prop[0] + prop[1]
+    prop = (prop*100).round(2)
+    cross_tab = pd.concat([freq, prop], axis=1, keys=["Frecuencia", "Porcentaje"])
+    cross_tab = cross_tab.rename(index = {'All':'Total'})
+    return cross_tab
+
+def join_plots(plots,sizes):
+    # Silence the warning when saving into the buffer
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PlotnineWarning)
+
+        # Crear divisiones relativas al ancho de cada plot
+        widths = [s[0] for s in sizes]
+        total_width = sum(widths)
+        total_height = np.array([s[1] for s in sizes]).max()
+
+        fig = plt.figure(figsize=(total_width,total_height), dpi=300)
+        gs = gridspec.GridSpec(1, len(plots), width_ratios=widths, figure=fig)
+
+        for i, p in enumerate(plots):
+            ax = fig.add_subplot(gs[i])
+            buf = io.BytesIO()
+
+            if isinstance(p, ggplot):
+                p.save(buf, format='png', dpi=300)
+                buf.seek(0)
+                img = plt.imread(buf)
+                ax.imshow(img)                   
+            elif isinstance(p,str):
+                ax.text(0.5, 0.5, p, fontsize=10,va='center', ha='center', transform=ax.transAxes)
+
+            ax.axis('off')
+
+        return fig    
+
+
+#Código V de Cramér:                                                                                                                                                                                                   import pandas as pd
+import numpy as np
+from scipy.stats import kruskal, levene, chi2_contingency
+
+
+def _format_p(p: float) -> str:
+    """Formatea el p-valor de forma legible."""
+    if p == 0.0:
+        return "< 0.001"
+    if p < 0.001:
+        return "< 0.001"
+    return f"{p:.4f}"
+
+
+def _format_v(v: float) -> str:
+    """Formatea el V de Cramér de forma legible."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return "NA"
+    return f"{v:.3f}"
+
+
+def _cramers_v_from_chi2(chi2: float, n: int, r: int, c: int) -> float:
+    """
+    Calcula V de Cramér a partir de chi2, n y dimensiones de la tabla.
+    V = sqrt( chi2 / (n * (min(r,c) - 1)) )
+    """
+    k = min(r, c)
+    if n <= 0 or k <= 1:
+        return np.nan
+    return float(np.sqrt(chi2 / (n * (k - 1))))
+
+
+def desc_text_per_target(data: pd.DataFrame, col: str, target_col: str) -> str:
+    """
+    Devuelve un texto con los p-values apropiados para col vs target_col.
+    """
+    df = data[[col, target_col]].dropna()
+
+    if df.empty:
+        return "No hay datos suficientes."
+
+    y = df[target_col]
+    x = df[col]
+
+    # Nº de valores únicos
+    n_unique = x.nunique()
+
+    # El texto donde se guardan los resultados
+    texto = ""
+
+    # ---- VARIABLE CONTINUA REAL ----
+    if pd.api.types.is_numeric_dtype(x) and n_unique > 3:
+
+        grupos = [x[y == k] for k in sorted(y.unique())]
+
+        # Kruskal-Wallis
+        _, p_kw = kruskal(*grupos)
+
+        # Levene (igualdad de varianzas)
+        _, p_lev = levene(*grupos, center="median")
+
+        texto += f"Kruskal-Wallis p-value: {_format_p(p_kw)}\n"
+        texto += f"Levene p-value: {_format_p(p_lev)}"
+
+        return texto
+
+    # ---- VARIABLE CATEGÓRICA / BINARIA ----
+    else:
+        ct = pd.crosstab(x, y)
+
+        if ct.shape[0] < 2 or ct.shape[1] < 2:
+            return texto + "No se puede aplicar test."
+
+        # Chi-cuadrado
+        chi2, p_chi, dof, expected = chi2_contingency(ct)
+
+        # V de Cramér (tamaño del efecto)
+        n = int(ct.values.sum())
+        r, c = ct.shape
+        v_cramer = _cramers_v_from_chi2(chi2=chi2, n=n, r=r, c=c)
+
+        texto += f"Chi-cuadrado p-value: {_format_p(p_chi)}\n"
+        texto += f"V de Cramér: {_format_v(v_cramer)}"
+
+        return texto
+
+
+
 
 ## Plot corr matrix
 #def corr_plot(data, numeric_var,fig_size,corr_filter=0):
