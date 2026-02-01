@@ -98,36 +98,6 @@ def desc_plot(data,col):
     
     return desc_text
 
-# Plot all the cuantitative info together
-def plot_var_cuantitative(histogram_plot,box_plot,desc_text,fig_size_histogram,fig_size_box_plot,fig_size_desc):
-    # Silence the warning when saving into the buffer
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", PlotnineWarning)
-
-        # Crear divisiones relativas al ancho de cada plot
-        widths = [fig_size_histogram[0],fig_size_box_plot[0],fig_size_desc[0]]
-        total_width = sum(widths)
-        total_height = np.array([fig_size_histogram[1],fig_size_box_plot[1],fig_size_desc[1]]).max()
-
-        fig = plt.figure(figsize=(total_width,total_height), dpi=300)
-        gs = gridspec.GridSpec(1, 3, width_ratios=widths, figure=fig)
-        plots = [histogram_plot, box_plot, desc_text]
-
-        for i, p in enumerate(plots):
-            ax = fig.add_subplot(gs[i])
-            buf = io.BytesIO()
-
-            if isinstance(p, ggplot):
-                p.save(buf, format='png', dpi=300)
-                buf.seek(0)
-                img = plt.imread(buf)
-                ax.imshow(img)                   
-            elif isinstance(p,str):
-                ax.text(0.5, 0.5, desc_text, fontsize=10,va='center', ha='center', transform=ax.transAxes)
-
-            ax.axis('off')
-
-        return fig    
 
 # Plot categorical variables
 def bar_plot(data, col,color_general,fig_size,nudge_y):
@@ -267,33 +237,61 @@ def box_per_target_plot(data,col,target_col,colors_per_group,fig_size_box_plot):
         )
     return box_plot
 
+def cat_per_group_plot(data,col,col_target,colors_per_group,fig_size,
+                       order='proportion',legend_pos='right',ticks_x_rot=False,
+                       alt_title=None
+                    ):
+    summary_df = pd.crosstab(data[col].fillna('Valor perdido (na)'),
+                             data[col_target],
+                             normalize="index"
+                            )*100
+    summary_df = summary_df.reset_index()
+    summary_df = summary_df.sort_values(1,ascending=True).reset_index(drop=True)
 
-def cat_variables_per_group(data,col,col_target,colors_per_group,fig_size):
-    discrete_freq = data.groupby(col,dropna=False)[col_target].value_counts(normalize=True, dropna=False).reset_index()
-    discrete_freq[col] = discrete_freq[col].astype(str)
-    discrete_freq[col] = discrete_freq[col].fillna('Valor perdido (nan)')
-    discrete_freq['proportion'] = discrete_freq['proportion']*100
-    discrete_freq[col_target] = pd.Categorical(discrete_freq[col_target].astype(str),categories=['1','0'],ordered=True)
-    
+    cat_order = summary_df[col].to_list()
+
+    summary_df = summary_df.melt(id_vars=col,value_vars=[0,1],value_name='proportion')
+    summary_df[col_target] = pd.Categorical(summary_df[col_target].astype(str),categories=['1','0'],ordered=True)
+
+    if order=='proportion':        
+        summary_df[col] = pd.Categorical(summary_df[col],categories=cat_order,ordered=True)
+        
+    elif order=='categories': 
+        summary_df = summary_df.sort_values(col, ascending=True)
+        summary_df[col] = pd.Categorical(summary_df[col],
+                                         categories=summary_df[col].unique(),
+                                         ordered=False)
+
+    if ticks_x_rot==True:
+        ticks_position_x = p9.element_text(size=7,rotation=45, ha='right')
+    else:
+        ticks_position_x = p9.element_text(size=7)
+            
+    if alt_title:
+        plot_title = alt_title
+    else:
+        plot_title = col
+
     plot = (
-        p9.ggplot(discrete_freq, p9.aes(x=col,y='proportion',fill=col_target,color=col_target))
+        p9.ggplot(summary_df, p9.aes(x=col,y='proportion',fill=col_target,color=col_target))
         + p9.geom_col(alpha = 0.2)
         + p9.scale_fill_manual(values=colors_per_group, labels=['1','0'])
         + p9.scale_color_manual(values=colors_per_group, labels=['1','0']) 
-        + p9.labs(title =f"Distribución de '{col}', comparando grupos")   
+        + p9.labs(title =f"'{plot_title}'")   
         + p9.theme(
             panel_background=p9.element_rect(fill="#ffffff"),
             plot_background=p9.element_rect(fill='#ffffff'),
             panel_grid_major_y=p9.element_line(color="#c0bfbf"),
             panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
             figure_size=fig_size,
-            axis_text_x=p9.element_text(size=7),
+            axis_text_x=ticks_position_x,
             axis_text_y=p9.element_text(size=7),
             axis_title_x=p9.element_blank(),
             axis_title_y=p9.element_blank(),
             plot_title=p9.element_text(size=9, weight="bold"),
             legend_title=p9.element_text(size=8),
             legend_text=p9.element_text(size=7),
+            legend_position=legend_pos
         )
     )
     return plot
@@ -310,6 +308,13 @@ def cross_tab_per_target (data,col,target_col):
     prop = (prop*100).round(2)
     cross_tab = pd.concat([freq, prop], axis=1, keys=["Frecuencia", "Porcentaje por clase"])
     cross_tab = cross_tab.rename(index = {'All':'Total'})
+
+    cross_tab_total = cross_tab.loc[['Total']]
+
+    cross_tab = cross_tab.drop('Total')
+    cross_tab = cross_tab.sort_values(('Porcentaje por clase',1), ascending=True)
+    cross_tab = pd.concat([cross_tab,cross_tab_total])
+
     return cross_tab
 
 def join_plots(plots,sizes):
@@ -471,6 +476,42 @@ def corr_plot(data, numeric_var,fig_size,corr_filter=0):
     )
 
     return corr_plot
+
+def scatter_plot(data,x_values,y_values,fig_size,title,x_label,y_label,colors_per_group=None,col_target=None):
+    data_plot = data.copy()
+    if col_target:
+        data_plot[col_target] = pd.Categorical(data_plot[col_target].astype(str),categories=['1','0'],ordered=True)
+        aes_scatter = p9.aes(x=x_values, y=y_values,fill=col_target,color=col_target)
+    else:
+        aes_scatter = p9.aes(x=x_values, y=y_values)
+
+    scatter_plot = (p9.ggplot(data_plot,aes_scatter)
+            + p9.geom_point(alpha=0.4, size=2)  # alpha helps with overlapping points
+            + p9.labs(
+                title=title,
+                x=x_label,
+                y=y_label
+            )
+            + p9.scale_fill_manual(values=colors_per_group)
+            + p9.scale_color_manual(values=colors_per_group) 
+            + p9.theme(
+                panel_background=p9.element_rect(fill="#ffffff"),
+                plot_background=p9.element_rect(fill='#ffffff'),
+                strip_background=p9.element_rect(fill='#ffffff'),
+                panel_grid_major_x=p9.element_blank(),
+                panel_grid_minor_x=p9.element_blank(),
+                panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+                panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),        
+                axis_text_x=p9.element_text(size=7),
+                axis_text_y=p9.element_text(size=7),
+                axis_title_x=p9.element_text(size=8),
+                axis_title_y=p9.element_text(size=8),
+                plot_title=p9.element_text(size=10),
+                figure_size=fig_size
+            )    
+    )
+    return scatter_plot
+
 
 ## Return a df with the corr_matrix just for the couples of variables that pass the filter and are not the same eg.(gdp vs gdp)
 #def corr_matrix(data, numeric_var,corr_filter = 0):
