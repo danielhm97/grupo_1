@@ -480,7 +480,7 @@ def corr_plot(data, numeric_var,fig_size,corr_filter=0):
 def scatter_plot(data,x_values,y_values,fig_size,title,x_label,y_label,colors_per_group=None,col_target=None):
     data_plot = data.copy()
     if col_target:
-        data_plot[col_target] = pd.Categorical(data_plot[col_target].astype(str),categories=['1','0'],ordered=True)
+        data_plot[col_target] = pd.Categorical(data_plot[col_target].astype(str),categories=['0','1'],ordered=True)
         aes_scatter = p9.aes(x=x_values, y=y_values,fill=col_target,color=col_target)
     else:
         aes_scatter = p9.aes(x=x_values, y=y_values)
@@ -512,6 +512,67 @@ def scatter_plot(data,x_values,y_values,fig_size,title,x_label,y_label,colors_pe
     )
     return scatter_plot
 
+def hist_comparative(data,col,target_col,colors_per_group,fig_size,order_categories=None):
+    data_plot = data.copy()
+
+    if order_categories:
+        data_plot[target_col] = pd.Categorical(data_plot[target_col],
+                                               categories=order_categories,
+                                               ordered=True)
+    else:
+        data_plot[target_col]=data_plot[target_col].astype(str)
+
+    means = (
+        data_plot
+        .groupby(target_col, as_index=False)
+        .agg(mean=(col, 'mean'))
+    )
+
+    plot = (
+        p9.ggplot(data_plot, p9.aes(x=col,fill=target_col))
+        + p9.geom_histogram(
+            bins=50,
+            alpha=0.5,
+            position='identity',
+            color = 'black',
+            size = 0.1
+        )
+        + p9.geom_vline(
+            data=means,
+            mapping=p9.aes(xintercept='mean',color=target_col),
+            linetype='dashed',
+            size=0.8,
+            show_legend = False
+        )
+        + p9.scale_y_continuous(expand=(0, 0))
+        + p9.scale_fill_manual(values=colors_per_group)
+        + p9.scale_color_manual(values=colors_per_group)
+        + p9.labs(
+            fill =target_col,
+            color=target_col,
+            title=f"Distribución de Edad según antecedentes de tabaquismo",
+            x='Edad',
+            y='Cantidad de pacientes'
+        )
+        + p9.theme(
+            panel_background=p9.element_rect(fill="#ffffff"),
+            plot_background=p9.element_rect(fill='#ffffff'),
+            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+            figure_size=fig_size,
+            axis_text_x=p9.element_text(size=7),
+            axis_text_y=p9.element_text(size=7),
+            axis_title_x=p9.element_text(size=8),
+            axis_title_y=p9.element_text(size=8),
+            plot_title=p9.element_text(size=9, weight="bold"),
+            legend_title=p9.element_text(size=8),
+            legend_text=p9.element_text(size=7),
+        )
+    )
+
+    means = means.set_index(target_col)
+    means = means.round(2).T
+    return plot,means   
 
 ## Return a df with the corr_matrix just for the couples of variables that pass the filter and are not the same eg.(gdp vs gdp)
 #def corr_matrix(data, numeric_var,corr_filter = 0):
