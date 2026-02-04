@@ -91,8 +91,6 @@ def desc_plot(data,col):
     desc = data[col].describe()
     desc_text = "\n".join(f"{idx} : {val:.6g}" for idx, val in desc.items())
 
-    col_median = data[col].median()
-    desc_text = desc_text + f'\nmedian : {col_median}'
     col_nas = data[col].isna().sum()
     desc_text = desc_text + f'\nmissing (nan) : {col_nas}'
     
