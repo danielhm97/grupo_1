@@ -8,6 +8,7 @@ import io
 import warnings
 from plotnine.exceptions import PlotnineWarning
 from scipy.stats import kruskal, levene, chi2_contingency
+import matplotlib.patheffects as pe
 
 
 # Plot the histogram
@@ -294,6 +295,46 @@ def cat_per_group_plot(data,col,col_target,colors_per_group,fig_size,
     )
     return plot
 
+def cat_plot_num_unbinned(
+    data, x_col, target_col,
+    colors_per_group={'0':'seagreen','1':'red'},
+    step=1.0, tick_every=None,
+    fig_size=(4,4), order='categories',
+    legend_pos='none', alt_title=None,
+    text_size=7
+):
+    bcol = f"{x_col}__b"
+    df = data.assign(**{bcol: (data[x_col]/step).round().astype('Int64')*step})
+
+    p = cat_per_group_plot(
+        df, bcol, target_col,
+        colors_per_group=colors_per_group,
+        fig_size=fig_size,
+        order=order,
+        legend_pos=legend_pos,
+        ticks_x_rot=True,
+        alt_title=alt_title
+    )
+
+    if tick_every is None:
+        tick_every = 10 * step
+
+    vals = sorted(df[bcol].dropna().astype(float).unique())
+    if not vals:
+        return p
+
+    # seleccionar valores que son múltiplos de tick_every (robusto con floats)
+    breaks = [v for v in vals if abs((v/tick_every) - round(v/tick_every)) < 1e-9]
+
+    def fmt(v):
+        return str(int(v)) if float(v).is_integer() else str(v)
+
+    return (
+        p
+        + p9.scale_x_discrete(breaks=breaks, labels=[fmt(v) for v in breaks])
+        + p9.theme(axis_text_x=p9.element_text(rotation=0, ha='center', size=text_size))
+    )
+
 def cross_tab_per_target (data,col,target_col):
     '''
     target_col and col must be categoricals
@@ -343,7 +384,99 @@ def join_plots(plots,sizes):
             ax.axis('off')
 
         return fig    
+    
+def _plot_stacked_percent_ax(
+    ax, data, group_col, target_col, title=None,
+    order=None, colors=None, min_show=2.0, fontsize=12,
+    width=0.9, alpha=0.35, edge_lw=2,
+    edgecolor0='darkgreen', edgecolor1='darkred',
+    ylim_top=110, grid_alpha=0.3, xtick_fontsize=10
+):
+    if colors is None:
+        colors = {'0': 'seagreen', '1': 'red'}
 
+    # % de clase 1 por grupo (asumiendo target binario 0/1)
+    pct1 = data.groupby(group_col)[target_col].mean() * 100
+
+    # reordenar y asegurar todas las categorías
+    if order is not None:
+        pct1 = pct1.reindex(order)
+
+    # categorías sin datos -> 0
+    pct1 = pct1.fillna(0.0)
+    pct0 = 100 - pct1
+
+    x = np.arange(len(pct1.index))
+
+    # barras apiladas
+    b0 = ax.bar(
+        x, pct0.values, width=width,
+        color=colors['0'], alpha=alpha,
+        edgecolor=edgecolor0, linewidth=edge_lw
+    )
+    b1 = ax.bar(
+        x, pct1.values, width=width, bottom=pct0.values,
+        color=colors['1'], alpha=alpha,
+        edgecolor=edgecolor1, linewidth=edge_lw
+    )
+
+    # etiquetas %
+    def _add_labels(bars, values, bottoms=None, color=None):
+        for i, rect in enumerate(bars):
+            h = float(values[i])
+            if h < min_show:
+                continue
+            y0 = 0.0 if bottoms is None else float(bottoms[i])
+            y = y0 + h / 2.0
+
+            label = f"{h:.1f}%" if h < 10 else f"{h:.0f}%"
+            ax.text(
+                rect.get_x() + rect.get_width() / 2.0, y, label,
+                ha="center", va="center",
+                fontsize=fontsize, color=color, zorder=10,
+                path_effects=[pe.Stroke(linewidth=3, foreground="white"), pe.Normal()]
+            )
+
+    _add_labels(b0, pct0.values, bottoms=None, color=colors['0'])
+    _add_labels(b1, pct1.values, bottoms=pct0.values, color=colors['1'])
+
+    # ejes y estilo
+    ax.set_title(f"'{title or target_col}'")
+    ax.set_xticks(x)
+    ax.set_xticklabels(pct1.index, fontsize=xtick_fontsize)
+    ax.set_ylim(0, ylim_top)
+    ax.grid(axis='y', alpha=grid_alpha)
+
+
+def plot_stacked_percent_panels(
+    data, group_col, target_cols,
+    order=None, colors=None,
+    min_show=2.0, fontsize=12,
+    figsize=(21, 7), sharey=True
+):
+    if colors is None:
+        colors = {'0': 'seagreen', '1': 'red'}
+
+    n = len(target_cols)
+    fig, axes = plt.subplots(1, n, figsize=figsize, sharey=sharey)
+    if n == 1:
+        axes = [axes]
+
+    for ax, t in zip(axes, target_cols):
+        _plot_stacked_percent_ax(
+            ax=ax,
+            data=data,
+            group_col=group_col,
+            target_col=t,
+            title=t,
+            order=order,
+            colors=colors,
+            min_show=min_show,
+            fontsize=fontsize
+        )
+
+    plt.tight_layout()
+    return fig, axes
 
 #Código V de Cramér:                                                                                                                                                                                                   import pandas as pd
 import numpy as np
@@ -570,273 +703,50 @@ def hist_comparative(data,col,target_col,colors_per_group,fig_size,order_categor
 
     means = means.set_index(target_col)
     means = means.round(2).T
-    return plot,means   
+    return plot,means  
 
-## Return a df with the corr_matrix just for the couples of variables that pass the filter and are not the same eg.(gdp vs gdp)
-#def corr_matrix(data, numeric_var,corr_filter = 0):
-#    corr_matrix = data[numeric_var].corr()
-#    col_order = corr_matrix.columns.tolist()
-#
-#    # Creamos una matriz 'mask' para poder quedarnos solo con el triangulo inferior
-#    mask = np.zeros_like(corr_matrix, dtype=bool)
-#    # Nos quedamos con el triangulo inferior y la diagonal
-#    mask[np.triu_indices_from(mask, k=1)] = True
-#
-#    # Utilizamos mask para filtrar y formateamos la matriz para plotnine
-#    corr_matrix = corr_matrix.mask(mask).stack().reset_index(name='value')
-#    corr_matrix.columns = ['var1', 'var2', 'value']
-#
-#    corr_matrix['var1'] = pd.Categorical(corr_matrix['var1'], categories=col_order)
-#    corr_matrix['var2'] = pd.Categorical(corr_matrix['var2'], categories=col_order)
-#    corr_matrix = corr_matrix[(np.abs(corr_matrix['value'])>=corr_filter) & (corr_matrix['var1']!=corr_matrix['var2'])]
-#    corr_matrix['var1'] = corr_matrix['var1'].cat.remove_unused_categories()
-#    corr_matrix['var2'] = corr_matrix['var2'].cat.remove_unused_categories()
-#    corr_matrix = corr_matrix.reset_index(drop = True)
-#    return corr_matrix
-#
-## Return an scatter_plot
-#def scatter_plot_corr (data,corr_matrix,i,fig_size):
-#    x_values = corr_matrix['var1'][i]
-#    y_values = corr_matrix['var2'][i]
-#    corr_value = corr_matrix['value'][i]
-#    scatter_plot = (
-#        p9.ggplot(data, p9.aes(x=x_values, y=y_values))
-#        + p9.geom_point(alpha=0.6, size=2)  # alpha helps with overlapping points
-#        + p9.geom_smooth(method='lm', color='blue')  # Adds a linear trend line
-#        + p9.labs(
-#            title=f'{x_values} vs {y_values}, r={corr_value:.3f}',
-#            x=f'{x_values}, n={data.shape[0]}'
-#
-#        )
-#        + p9.theme(
-#            panel_background=p9.element_rect(fill="#ffffff"),
-#            plot_background=p9.element_rect(fill='#ffffff'),
-#            strip_background=p9.element_rect(fill='#ffffff'),
-#            panel_grid_major_x=p9.element_line(color="#c0bfbf"),
-#            panel_grid_minor_x=p9.element_line(color="#e6e4e4ff"),
-#            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
-#            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),        
-#            axis_text_x=p9.element_text(size=7),
-#            axis_text_y=p9.element_text(size=7),
-#            axis_title_x=p9.element_text(size=8),
-#            axis_title_y=p9.element_text(size=8),
-#            plot_title=p9.element_text(size=8),
-#            figure_size=fig_size
-#        )
-#
-#    )
-#    return scatter_plot
-#
-## Plot in a grid all the plot that are in an array
-#def plot_grid(plots,fig_size_plot,grid_rows,grid_cols):
-#    # Silence the warning when saving into the buffer
-#    with warnings.catch_warnings():
-#        warnings.simplefilter("ignore", PlotnineWarning)
-#        fig = plt.figure(figsize=fig_size_plot, dpi=300)
-#        gs = gridspec.GridSpec(grid_rows, grid_cols, figure=fig)
-#
-#        for i, p in enumerate(plots):
-#            ax = fig.add_subplot(gs[i])
-#            buf = io.BytesIO()
-#
-#            if isinstance(p, ggplot):
-#                p.save(buf, format='png', dpi=300)
-#                buf.seek(0)
-#                img = plt.imread(buf)
-#                ax.imshow(img)
-#                ax.axis('off')
-#
-#    return fig    
-#    
-## Plot adjusted r2 evolution
-#def plot_r2_evolution(info_iterations,fig_size,dpi):
-#    fig, ax1 = plt.subplots(figsize=fig_size,dpi=dpi)
-#
-#    # --- Left axis: Adj R² ---
-#    color_line = 'steelblue'
-#    ax1.set_xlabel('Número Features', fontsize=9)
-#    ax1.set_ylabel('R² ajustado', color='black', fontsize=9)
-#    ax1.plot(info_iterations['n_features'], info_iterations['adj_r2'],
-#             color=color_line, marker='o', linestyle='--', linewidth=2)
-#    ax1.tick_params(axis='y', labelcolor='black',labelsize=6)
-#    ax1.tick_params(axis='x', labelsize=6)
-#
-#    # Add labels on the dots
-#    for x, y in zip(info_iterations['n_features'], info_iterations['adj_r2']):
-#        ax1.text(x, y + 0.006, f'{y:.3f}', ha='center', va='bottom', color='black', fontsize=6)
-#
-#    # --- Right axis: % improvement ---
-#    ax2 = ax1.twinx()  # create a second y-axis
-#    color_bar = 'seagreen'
-#    ax2.set_ylabel('% Mejora', color='black')
-#    ax2.bar(info_iterations['n_features'], info_iterations['pct_improvement'],
-#            color=color_bar, alpha=0.5, width=0.5)
-#    ax2.set_yticks([])
-#    ax2.set_ylim(0, 20) 
-#
-#    # Remove top and right spines for both axes
-#    ax1.spines['top'].set_visible(False)
-#    ax1.spines['right'].set_visible(False)
-#    ax2.spines['top'].set_visible(False)
-#    ax2.spines['right'].set_visible(False)
-#
-#    # Reduce thickness of bottom and left spines
-#    ax1.spines['bottom'].set_linewidth(0.5)
-#    ax1.spines['left'].set_linewidth(0.5)
-#
-#    # Optional: add grid
-#    ax1.grid(True, linestyle='-', alpha=0.2, axis='y')
-#
-#    # Optional: add values on top of bars
-#    for x, y in zip(info_iterations['n_features'], info_iterations['pct_improvement']):
-#        if y>0:
-#            ax2.text(x, y + 0.15, f'{y:.2f}%', ha='center', color='black', fontsize=7)
-#    
-#    plt.title('Evolución de R² ajustado y % de mejora por número de features', fontsize=10, pad=18)
-#    return fig
-#
-## Best subset selection 
-#def best_subset_selection(X, y, max_features=None, metric='adj_r2', method='best'):
-#    if max_features is None:
-#        max_features = len(X.columns)
-#    n = len(y)
-#
-#    def get_metrics(X_subset, y):
-#        X_sm = sm.add_constant(X_subset)
-#        model_sm = sm.OLS(y, X_sm).fit()
-#        y_pred = model_sm.predict(X_sm)
-#        mse = mean_squared_error(y, y_pred)
-#        r2 = r2_score(y, y_pred)
-#        p = X_subset.shape[1]
-#        adj_r2 = 1 - (1 - r2) * (n - 1) / (n - p - 1)
-#        aic = model_sm.aic
-#        bic = model_sm.bic
-#        return mse, r2, adj_r2, aic, bic, model_sm
-#
-#    best_results = []
-#    resultados = []
-#    if method == 'best':
-#        for k in range(1, max_features + 1):
-#            k_results = []
-#            for combo in combinations(X.columns, k):
-#                X_subset = X[list(combo)]
-#                mse, r2, adj_r2, aic, bic, model_sm = get_metrics(X_subset, y)
-#                k_results.append({'features': combo, 'mse': mse, 'r2': r2, 'adj_r2': adj_r2,
-#                                  'aic': aic, 'bic': bic, 'model': model_sm})
-#                
-#            k_results = sorted(k_results, key=lambda x: x[metric], reverse=True)
-#            best_results.append(k_results[0])
-#            resultados = resultados + k_results
-#
-#                
-#    else:
-#        raise ValueError('Método no reconocido')
-#
-#    # Ordenar el resultado final
-#    reverse_order = metric in ['r2', 'adj_r2']
-#    resultados = sorted(resultados, key=lambda x: x[metric], reverse=reverse_order)
-#    best_results = sorted(best_results, key=lambda x: x[metric], reverse=reverse_order)
-#    return resultados, best_results
-#
-#
-#def scatter_plot_th(data,x_values,y_values,y_intercept,fig_size,title,x_label,y_label):
-#    scatter_plot = (p9.ggplot(data, p9.aes(x=x_values, y=y_values))
-#            + p9.geom_point(alpha=0.6, size=2)  # alpha helps with overlapping points                        
-#            + p9.geom_hline(
-#                p9.aes(yintercept=y_intercept),
-#                color='red',
-#                linetype='dashed',
-#                size=0.8,
-#                alpha=0.8
-#            )
-#            + p9.labs(
-#                title=title,
-#                x=x_label,
-#                y=y_label
-#            )
-#            #+ p9.scale_y_continuous(
-#            #    breaks=np.arange(0, max(data[y_values]), 0.02)
-#            #)
-#            + p9.theme(
-#                panel_background=p9.element_rect(fill="#ffffff"),
-#                plot_background=p9.element_rect(fill='#ffffff'),
-#                strip_background=p9.element_rect(fill='#ffffff'),
-#                panel_grid_major_x=p9.element_blank(),
-#                panel_grid_minor_x=p9.element_blank(),
-#                panel_grid_major_y=p9.element_line(color="#c0bfbf"),
-#                panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),        
-#                axis_text_x=p9.element_text(size=7),
-#                axis_text_y=p9.element_text(size=7),
-#                axis_title_x=p9.element_text(size=8),
-#                axis_title_y=p9.element_text(size=8),
-#                plot_title=p9.element_text(size=10),
-#                figure_size=fig_size
-#            )    
-#    )
-#    return scatter_plot
-#
-#def qq_plot (data,col,color_general,fig_size):
-#    qq_plot = (
-#        p9.ggplot(data, p9.aes(sample=col))
-#        + p9.stat_qq(alpha = 0.4, color = color_general)
-#        + p9.stat_qq_line(color = 'red')
-#        + p9.labs(
-#            title='Q-Q Plot residuos',
-#            x='Cuantiles teóricos',
-#            y='Cuantiles de la muestra'
-#        )
-#        + p9.theme(
-#            panel_background=p9.element_rect(fill="#ffffff"),
-#            plot_background=p9.element_rect(fill='#ffffff'),
-#            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
-#            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
-#            figure_size=fig_size,
-#            axis_text_x=p9.element_text(size=7),
-#            axis_text_y=p9.element_text(size=7),
-#            axis_title_x=p9.element_text(size=8),
-#            axis_title_y=p9.element_text(size=8),
-#            plot_title=p9.element_text(size=9, weight="bold"),
-#            legend_title=p9.element_text(size=8),
-#            legend_text=p9.element_text(size=7),
-#        ) 
-#    )
-#    return qq_plot
-#
-#def hist_density_plot(data,col,color_general,fig_size):
-#    hist_density_plot = (
-#        p9.ggplot(data, p9.aes(x=col))
-#        + p9.geom_histogram(
-#            p9.aes(y='..density..'),
-#            bins=30,
-#            alpha=0.2,
-#            fill = color_general,
-#            color = color_general,
-#            position='identity'
-#        )
-#        + p9.geom_density(
-#            bw='nrd0',
-#            color='black',
-#            size=0.25
-#        )
-#        + p9.labs(
-#            title='Histograma de residuos',
-#            y='Densidad'
-#        )
-#        + p9.theme(
-#            panel_background=p9.element_rect(fill="#ffffff"),
-#            plot_background=p9.element_rect(fill='#ffffff'),
-#            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
-#            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
-#            figure_size=fig_size,
-#            axis_text_x=p9.element_text(size=7),
-#            axis_text_y=p9.element_text(size=7),
-#            axis_title_x=p9.element_blank(),
-#            axis_title_y=p9.element_text(size=8),
-#            plot_title=p9.element_text(size=9, weight="bold"),
-#            legend_title=p9.element_text(size=8),
-#            legend_text=p9.element_text(size=7),
-#        )        
-#    )
-#    return hist_density_plot
-#
-#
+def kruskal_table(groups: dict, continuous_vars: list) -> pd.DataFrame:
+    """
+    groups: dict {nombre_grupo: dataframe}
+    continuous_vars: lista de variables continuas
+    """
+    rows = []
+    for var in continuous_vars:
+        samples = [g[var].dropna() for g in groups.values()]
+        stat, p = kruskal(*samples)
+        rows.append({
+            'Variable': var,
+            'Test': 'Kruskal-Wallis',
+            'p-value': p
+        })
+    return pd.DataFrame(rows)
+
+def cramers_v_from_ct(ct: pd.DataFrame) -> float:
+    chi2, _, _, _ = chi2_contingency(ct)
+    n = ct.to_numpy().sum()
+    r, k = ct.shape
+    return np.sqrt(chi2 / (n * (min(r, k) - 1)))
+
+def chi2_binary_table(data: pd.DataFrame, group_col: str,
+                      groups: list, binary_vars: list) -> pd.DataFrame:
+    rows = []
+    for var in binary_vars:
+        ct = pd.crosstab(data[group_col], data[var]).loc[groups]
+        chi2, p, _, _ = chi2_contingency(ct)
+        v = cramers_v_from_ct(ct)
+        rows.append({
+            'Variable': var,
+            'Test': 'Chi-cuadrado',
+            'p-value': p,
+            'V de Cramér': v
+        })
+    return pd.DataFrame(rows)
+
+def proportion_table(data: pd.DataFrame, group_col: str,
+                     groups: list, binary_vars: list) -> pd.DataFrame:
+    return (
+        data[data[group_col].isin(groups)]
+        .groupby(group_col)[binary_vars]
+        .mean()
+        * 100
+    ).round(2)
