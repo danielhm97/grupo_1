@@ -8,6 +8,7 @@ import io
 import warnings
 from plotnine.exceptions import PlotnineWarning
 from scipy.stats import kruskal, levene, chi2_contingency
+import matplotlib.patheffects as pe
 
 
 # Plot the histogram
@@ -294,6 +295,46 @@ def cat_per_group_plot(data,col,col_target,colors_per_group,fig_size,
     )
     return plot
 
+def cat_plot_num_unbinned(
+    data, x_col, target_col,
+    colors_per_group={'0':'seagreen','1':'red'},
+    step=1.0, tick_every=None,
+    fig_size=(4,4), order='categories',
+    legend_pos='none', alt_title=None,
+    text_size=7
+):
+    bcol = f"{x_col}__b"
+    df = data.assign(**{bcol: (data[x_col]/step).round().astype('Int64')*step})
+
+    p = cat_per_group_plot(
+        df, bcol, target_col,
+        colors_per_group=colors_per_group,
+        fig_size=fig_size,
+        order=order,
+        legend_pos=legend_pos,
+        ticks_x_rot=True,
+        alt_title=alt_title
+    )
+
+    if tick_every is None:
+        tick_every = 10 * step
+
+    vals = sorted(df[bcol].dropna().astype(float).unique())
+    if not vals:
+        return p
+
+    # seleccionar valores que son múltiplos de tick_every (robusto con floats)
+    breaks = [v for v in vals if abs((v/tick_every) - round(v/tick_every)) < 1e-9]
+
+    def fmt(v):
+        return str(int(v)) if float(v).is_integer() else str(v)
+
+    return (
+        p
+        + p9.scale_x_discrete(breaks=breaks, labels=[fmt(v) for v in breaks])
+        + p9.theme(axis_text_x=p9.element_text(rotation=0, ha='center', size=text_size))
+    )
+
 def cross_tab_per_target (data,col,target_col):
     '''
     target_col and col must be categoricals
@@ -343,7 +384,99 @@ def join_plots(plots,sizes):
             ax.axis('off')
 
         return fig    
+    
+def _plot_stacked_percent_ax(
+    ax, data, group_col, target_col, title=None,
+    order=None, colors=None, min_show=2.0, fontsize=12,
+    width=0.9, alpha=0.35, edge_lw=2,
+    edgecolor0='darkgreen', edgecolor1='darkred',
+    ylim_top=110, grid_alpha=0.3, xtick_fontsize=10
+):
+    if colors is None:
+        colors = {'0': 'seagreen', '1': 'red'}
 
+    # % de clase 1 por grupo (asumiendo target binario 0/1)
+    pct1 = data.groupby(group_col)[target_col].mean() * 100
+
+    # reordenar y asegurar todas las categorías
+    if order is not None:
+        pct1 = pct1.reindex(order)
+
+    # categorías sin datos -> 0
+    pct1 = pct1.fillna(0.0)
+    pct0 = 100 - pct1
+
+    x = np.arange(len(pct1.index))
+
+    # barras apiladas
+    b0 = ax.bar(
+        x, pct0.values, width=width,
+        color=colors['0'], alpha=alpha,
+        edgecolor=edgecolor0, linewidth=edge_lw
+    )
+    b1 = ax.bar(
+        x, pct1.values, width=width, bottom=pct0.values,
+        color=colors['1'], alpha=alpha,
+        edgecolor=edgecolor1, linewidth=edge_lw
+    )
+
+    # etiquetas %
+    def _add_labels(bars, values, bottoms=None, color=None):
+        for i, rect in enumerate(bars):
+            h = float(values[i])
+            if h < min_show:
+                continue
+            y0 = 0.0 if bottoms is None else float(bottoms[i])
+            y = y0 + h / 2.0
+
+            label = f"{h:.1f}%" if h < 10 else f"{h:.0f}%"
+            ax.text(
+                rect.get_x() + rect.get_width() / 2.0, y, label,
+                ha="center", va="center",
+                fontsize=fontsize, color=color, zorder=10,
+                path_effects=[pe.Stroke(linewidth=3, foreground="white"), pe.Normal()]
+            )
+
+    _add_labels(b0, pct0.values, bottoms=None, color=colors['0'])
+    _add_labels(b1, pct1.values, bottoms=pct0.values, color=colors['1'])
+
+    # ejes y estilo
+    ax.set_title(f"'{title or target_col}'")
+    ax.set_xticks(x)
+    ax.set_xticklabels(pct1.index, fontsize=xtick_fontsize)
+    ax.set_ylim(0, ylim_top)
+    ax.grid(axis='y', alpha=grid_alpha)
+
+
+def plot_stacked_percent_panels(
+    data, group_col, target_cols,
+    order=None, colors=None,
+    min_show=2.0, fontsize=12,
+    figsize=(21, 7), sharey=True
+):
+    if colors is None:
+        colors = {'0': 'seagreen', '1': 'red'}
+
+    n = len(target_cols)
+    fig, axes = plt.subplots(1, n, figsize=figsize, sharey=sharey)
+    if n == 1:
+        axes = [axes]
+
+    for ax, t in zip(axes, target_cols):
+        _plot_stacked_percent_ax(
+            ax=ax,
+            data=data,
+            group_col=group_col,
+            target_col=t,
+            title=t,
+            order=order,
+            colors=colors,
+            min_show=min_show,
+            fontsize=fontsize
+        )
+
+    plt.tight_layout()
+    return fig, axes
 
 #Código V de Cramér:                                                                                                                                                                                                   import pandas as pd
 import numpy as np
@@ -570,7 +703,54 @@ def hist_comparative(data,col,target_col,colors_per_group,fig_size,order_categor
 
     means = means.set_index(target_col)
     means = means.round(2).T
-    return plot,means   
+    return plot,means  
+
+def kruskal_table(groups: dict, continuous_vars: list) -> pd.DataFrame:
+    """
+    groups: dict {nombre_grupo: dataframe}
+    continuous_vars: lista de variables continuas
+    """
+    rows = []
+    for var in continuous_vars:
+        samples = [g[var].dropna() for g in groups.values()]
+        stat, p = kruskal(*samples)
+        rows.append({
+            'Variable': var,
+            'Test': 'Kruskal-Wallis',
+            'p-value': p
+        })
+    return pd.DataFrame(rows)
+
+def cramers_v_from_ct(ct: pd.DataFrame) -> float:
+    chi2, _, _, _ = chi2_contingency(ct)
+    n = ct.to_numpy().sum()
+    r, k = ct.shape
+    return np.sqrt(chi2 / (n * (min(r, k) - 1)))
+
+def chi2_binary_table(data: pd.DataFrame, group_col: str,
+                      groups: list, binary_vars: list) -> pd.DataFrame:
+    rows = []
+    for var in binary_vars:
+        ct = pd.crosstab(data[group_col], data[var]).loc[groups]
+        chi2, p, _, _ = chi2_contingency(ct)
+        v = cramers_v_from_ct(ct)
+        rows.append({
+            'Variable': var,
+            'Test': 'Chi-cuadrado',
+            'p-value': p,
+            'V de Cramér': v
+        })
+    return pd.DataFrame(rows)
+
+def proportion_table(data: pd.DataFrame, group_col: str,
+                     groups: list, binary_vars: list) -> pd.DataFrame:
+    return (
+        data[data[group_col].isin(groups)]
+        .groupby(group_col)[binary_vars]
+        .mean()
+        * 100
+    ).round(2)
+
 
 ## Return a df with the corr_matrix just for the couples of variables that pass the filter and are not the same eg.(gdp vs gdp)
 #def corr_matrix(data, numeric_var,corr_filter = 0):
