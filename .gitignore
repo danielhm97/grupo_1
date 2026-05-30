@@ -2,3 +2,5 @@ scoring_demo/
 others/
 code/__pycache__/
 informe/
+.env
+wandb/
