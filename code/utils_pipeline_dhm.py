@@ -96,6 +96,22 @@ class TypeCaster(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         X = X.copy()
-        X[self.columns] = X[self.columns].astype(self.dtype)
+        active = [c for c in self.columns if c in X.columns]
+        if active:
+            X[active] = X[active].astype(self.dtype)
+        return X
+
+class ColumnMapper(BaseEstimator, TransformerMixin):
+    def __init__(self, column, mapping):
+        self.column = column
+        self.mapping = mapping
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        if self.column in X.columns:
+            X[self.column] = X[self.column].map(self.mapping)
         return X
     
