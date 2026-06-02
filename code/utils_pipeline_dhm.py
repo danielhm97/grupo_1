@@ -7,6 +7,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_validate
 import category_encoders as ce
 from optbinning import OptimalBinning
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+import plotnine as p9
+from plotnine import ggplot
 
 
 # ── Custom transformers ──
@@ -147,3 +151,127 @@ def evaluate(pipe, X_train, y_train, cv):
                             n_jobs=-1)
     return (scores['test_pr_auc'].mean(), scores['test_pr_auc'].std(),
             scores['test_roc_auc'].mean(), scores['test_roc_auc'].std())
+
+
+# ── Plotting functions ──
+
+def plot_confusion_matrix(cm, title=None, fig_size=(4, 3)):
+    """Heatmap de matriz de confusion con counts y % fila."""
+    n = cm.shape[0]
+    row_sums = cm.sum(axis=1, keepdims=True)
+    cm_pct = np.where(row_sums > 0, cm / row_sums * 100, 0)
+
+    fig, ax = plt.subplots(figsize=fig_size)
+    cmap = np.full((n, n, 4), [0.8, 0.2, 0.2, 0.25], dtype=float)
+    for i in range(n):
+        cmap[i, i] = [0.2, 0.6, 0.2, 0.25]
+    ax.imshow(cmap)
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, f'{cm[i, j]}\n({cm_pct[i, j]:.1f}%)',
+                    ha='center', va='center', fontsize=10, fontweight='bold')
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(['Pred: 0', 'Pred: 1'])
+    ax.set_yticklabels(['Actual 0', 'Actual 1'])
+    ax.set_xlabel('Prediccion', fontsize=9)
+    ax.set_ylabel('Real', fontsize=9)
+    if title:
+        ax.set_title(title, fontsize=10, fontweight='bold')
+    fig.tight_layout()
+    return fig
+
+
+def plot_elbow(be_df, optimal_n, fig_size=(6, 4)):
+    """Linea de PR-AUC vs n_features con marcador en el codo."""
+    df = be_df.copy()
+    if 'pr_val' not in df.columns:
+        df['pr_val'] = df['pr_auc'].str.extract(r'([\d.]+)').astype(float)
+    p = (
+        p9.ggplot(df, p9.aes(x='n_features', y='pr_val'))
+        + p9.geom_line(color='#2c7fb8', size=0.8)
+        + p9.geom_point(color='#2c7fb8', size=2)
+        + p9.geom_point(
+            data=df[df['n_features'] == optimal_n],
+            mapping=p9.aes(x='n_features', y='pr_val'),
+            color='red', size=3.5
+        )
+        + p9.geom_vline(xintercept=optimal_n, linetype='dashed',
+                         color='red', size=0.5)
+        + p9.labs(title='Backward Elimination',
+                  x='Numero de features', y='PR-AUC (CV mean)')
+        + p9.scale_x_continuous(
+            breaks=sorted(df['n_features'].unique()),
+            limits=(df['n_features'].min() - 0.3,
+                    df['n_features'].max() + 0.3)
+        )
+        + p9.theme(
+            panel_background=p9.element_rect(fill="#ffffff"),
+            plot_background=p9.element_rect(fill='#ffffff'),
+            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+            figure_size=fig_size,
+            axis_text_x=p9.element_text(size=8),
+            axis_text_y=p9.element_text(size=8),
+            axis_title_x=p9.element_text(size=9),
+            axis_title_y=p9.element_text(size=9),
+            plot_title=p9.element_text(size=10, weight="bold"),
+        )
+    )
+    return p
+
+
+def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
+                         fig_size=(8, 4)):
+    """Dual-axis: barras (frecuencia) + linea (tasa diabetes) por
+    categoria/bin, ordenado por proporcion de target=1."""  # noqa: E501
+    data = pd.DataFrame({'feature': X_raw[feature].copy(), 'target': y})
+    cfg = column_config.get(feature, {})
+    is_binned = cfg.get('transform') == 'binning'
+
+    if is_binned and preproc is not None and feature in preproc.binners_:
+        binner = preproc.binners_[feature]
+        tbl = binner.binning_table.build()
+        tbl = tbl[tbl['Bin'].astype(str).str.strip() != ''].copy()
+        idx_to_label = {idx: r['Bin'] for idx, r in tbl.iterrows()}
+        bin_indices = binner.transform(data['feature'].values, metric='bins')
+        data['group'] = [idx_to_label.get(i, f'Bin {i}') for i in bin_indices]
+    else:
+        data['group'] = data['feature'].astype(str)
+
+    agg = (
+        data.groupby('group', observed=True)
+        .agg(count=('target', 'count'), prop_diabetes=('target', 'mean'))
+        .reset_index()
+    )
+    agg['freq_norm'] = agg['count'] / agg['count'].sum() * 100
+    agg = agg.sort_values('prop_diabetes', ascending=True).reset_index(drop=True)
+
+    x_labels = agg['group'].tolist()
+    x = np.arange(len(agg))
+
+    fig, ax1 = plt.subplots(figsize=fig_size)
+    ax1.bar(x, agg['freq_norm'].values, width=0.6, color='gray',
+            alpha=0.35, edgecolor='gray', linewidth=1)
+    ax1.set_ylabel('Frecuencia relativa (%)', fontsize=9)
+    ax1.set_xlabel(feature, fontsize=9)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=7)
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, agg['prop_diabetes'].values * 100, 'o-', color='darkred',
+             linewidth=1.5, markersize=4, zorder=5)
+    ax2.set_ylabel('Tasa de diabetes (%)', fontsize=9, color='darkred')
+    ax2.tick_params(axis='y', labelcolor='darkred')
+
+    for i, v in enumerate(agg['prop_diabetes'].values):
+        ax2.text(i, v * 100 + 1.5, f'{v*100:.1f}%', ha='center', va='bottom',
+                 fontsize=7, color='darkred',
+                 path_effects=[pe.Stroke(linewidth=2, foreground='white'),
+                               pe.Normal()])
+
+    ax1.set_title(feature, fontsize=10, weight='bold')
+    ax1.grid(axis='y', alpha=0.3)
+    ax1.set_axisbelow(True)
+    fig.tight_layout()
+    return fig
