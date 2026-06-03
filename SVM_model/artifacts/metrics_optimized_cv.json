@@ -1,0 +1,28 @@
+{
+  "test": {
+    "precision": 0.6357798165137615,
+    "recall": 0.8167354154390101,
+    "f1": 0.7149858137735362,
+    "pr_auc": 0.8557895781735535,
+    "roc_auc": 0.970136651273772
+  },
+  "baseline": {
+    "precision": 0.4433,
+    "recall": 0.9287,
+    "f1": 0.6002,
+    "pr_auc": 0.8526,
+    "roc_auc": 0.9736
+  },
+  "cv": {
+    "best_avg_precision": 0.8307,
+    "n_splits": 3,
+    "combinations": 72,
+    "subset_size": 19987
+  },
+  "confusion_matrix": {
+    "tn": 17496,
+    "fp": 794,
+    "fn": 311,
+    "tp": 1386
+  }
+}
