@@ -14,7 +14,6 @@ from plotnine import ggplot
 
 
 # ── Custom transformers ──
-
 class TypeCaster(BaseEstimator, TransformerMixin):
     def __init__(self, columns, dtype):
         self.columns = columns
@@ -185,12 +184,14 @@ def plot_confusion_matrix(cm, title=None, fig_size=(4, 3)):
 def plot_elbow(be_df, optimal_n, fig_size=(6, 4)):
     """Linea de PR-AUC vs n_features con marcador en el codo."""
     df = be_df.copy()
+    line_col = 'steelblue'
+
     if 'pr_val' not in df.columns:
         df['pr_val'] = df['pr_auc'].str.extract(r'([\d.]+)').astype(float)
     p = (
         p9.ggplot(df, p9.aes(x='n_features', y='pr_val'))
-        + p9.geom_line(color='#2c7fb8', size=0.8)
-        + p9.geom_point(color='#2c7fb8', size=2)
+        + p9.geom_line(color=line_col, size=0.8)
+        + p9.geom_point(color=line_col, size=2)
         + p9.geom_point(
             data=df[df['n_features'] == optimal_n],
             mapping=p9.aes(x='n_features', y='pr_val'),
@@ -275,3 +276,32 @@ def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
     ax1.set_axisbelow(True)
     fig.tight_layout()
     return fig
+
+# Calcutation
+
+def iv_variable (data,col,target):
+    data_grouped=(
+    data
+    .groupby(col,dropna=False)
+    .agg(Count = (f'{col}','size'),
+         Non_Event=(f'{target}', lambda x: (x == 0).sum()),
+         Event=(f'{target}', lambda x: (x == 1).sum())
+        )
+    )
+    data_grouped['count_%'] = data_grouped['Count']/data_grouped['Count'].sum()
+    data_grouped['event_rate'] = data_grouped['Event']/(data_grouped['Event']+data_grouped['Non_Event'])
+    data_grouped['WoE'] = np.log((data_grouped['Non_Event'] / data_grouped['Non_Event'].sum()) / (data_grouped["Event"] /data_grouped["Event"].sum()))
+    data_grouped['IV'] = ((data_grouped['Non_Event'] / data_grouped['Non_Event'].sum()) - (data_grouped["Event"] /data_grouped["Event"].sum()))*data_grouped['WoE']
+    #return data_grouped
+    # assuming your DataFrame is called df
+    summary = {
+        'Variable': col,
+        #'Unique_values': data_grouped[col].unique().shape[0],
+        "Count": data_grouped["Count"].sum(),
+        "Non_Event": data_grouped["Non_Event"].sum(),
+        "Event": data_grouped["Event"].sum(),
+        "count_%": data_grouped["count_%"].sum(),  # should be 1.0
+        "event_rate": data_grouped["Event"].sum() / data_grouped["Count"].sum(),
+        "IV total": data_grouped["IV"].sum(),
+    }
+    return summary

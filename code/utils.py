@@ -564,14 +564,14 @@ def desc_text_per_target(data: pd.DataFrame, col: str, target_col: str) -> str:
 
         return texto
 
-
-
-
 # Plot corr matrix
-def corr_plot(data, numeric_var,fig_size,corr_filter=0):
+def corr_plot(data, numeric_var,fig_size,corr_filter=0, title=None):
     # Calcular matriz de correlación
     corr_matrix = data[numeric_var].corr()
     col_order = corr_matrix.columns.tolist()
+
+    if title is None:
+        title = "Correlation Matrix"
 
     # Creamos una matriz 'mask' para poder quedarnos solo con el triangulo inferior
     mask = np.zeros_like(corr_matrix, dtype=bool)
@@ -603,7 +603,7 @@ def corr_plot(data, numeric_var,fig_size,corr_filter=0):
             axis_title=p9.element_blank(),
             figure_size=fig_size
         )
-        + p9.labs(title="Correlation Matrix", fill="Corr")
+        + p9.labs(title=title, fill="Corr")
     )
 
     return corr_plot
