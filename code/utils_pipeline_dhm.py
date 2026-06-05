@@ -235,6 +235,80 @@ def plot_confusion_matrix(cm,size, title=None):
 
     return plot
 
+import plotnine as p9
+from sklearn.metrics import precision_recall_curve, average_precision_score
+
+def auc_box(X_train, y_train, X_test, y_test, model_pipe):
+    aucs = {}
+    for name, X, y in [('Train', X_train, y_train), ('Test', X_test, y_test)]:
+        y_proba = model_pipe.predict_proba(X)[:, 1]
+        aucs[name] = average_precision_score(y, y_proba)
+
+    auc_label = f"Train AUC: {aucs['Train']:.3f}\nTest  AUC: {aucs['Test']:.3f}"
+
+    return auc_label
+
+def df_pr_curve(X_train, y_train, X_test, y_test, model_pipe):
+    # Build dataframes for each curve
+    df_plot = []
+    for name, X, y in [('Train', X_train, y_train), ('Test', X_test, y_test)]:
+        y_proba = model_pipe.predict_proba(X)[:, 1]
+        pr, re, _ = precision_recall_curve(y, y_proba)
+        df_pr = pd.DataFrame({'Precision': pr, 'Recall': re})
+        df_pr['Model'] = name
+        df_plot.append(df_pr)
+
+    df_plot = pd.concat(df_plot, ignore_index=True)
+    df_plot['Model'] = pd.Categorical(df_plot['Model'], categories=['Train', 'Test'], ordered=True)
+    return df_plot
+
+def pr_curve_plot(df_plot,
+                  random_level, 
+                  auc_label,
+                  title = 'Curva Precision-Recall',
+                  size = (6,5)
+                  ):
+    color_map = {'Train': '#a00000', 'Test': '#1a80bb'}
+
+    plot = (
+        p9.ggplot(df_plot, p9.aes(x='Recall', y='Precision', color='Model'))
+        + p9.geom_line(size=1, alpha=0.7)
+        + p9.geom_hline(yintercept=random_level, linetype='dashed', color='grey')
+        + p9.annotate('text', x=0.25, y=random_level + 0.02,
+                   label=f'Random ({random_level:.3f})', color='black', ha='right', size=9
+                )
+        + p9.annotate(
+            'label',
+            x=0.97, y=0.97,
+            label=auc_label,
+            ha='right', va='top',
+            size=9,
+            color='black',
+            fill='white',
+            label_padding=0.4
+        )
+        + p9.scale_color_manual(values=color_map)
+        + p9.scale_y_continuous(limits=(0, 1.0), expand=(0.05, 0), breaks=np.linspace(0, 1.0, 6))
+        + p9.scale_x_continuous(limits=(0, 1.0), expand=(0.05, 0), breaks=np.linspace(0, 1.0, 6))
+        + p9.labs(title=title, x='Recall', y='Precision', color='')
+        + p9.theme(
+            panel_background=p9.element_rect(fill="#ffffff"),
+            plot_background=p9.element_rect(fill='#ffffff'),
+            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
+            panel_grid_major_x=p9.element_line(color="#c0bfbf"),
+            panel_grid_minor_x=p9.element_line(color="#e6e4e4ff"),
+            figure_size=size,
+            axis_text_x=p9.element_text(size=9,color='black'),
+            axis_text_y=p9.element_text(size=9,color='black'),
+            plot_title=p9.element_text(size=10,margin={"t": 8, "b": 8},weight="bold"),
+            legend_position="right"
+        )
+    )
+
+    return plot
+
+
 
 def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
                          fig_size=(8, 4)):
@@ -269,7 +343,7 @@ def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
     ax1.bar(x, agg['freq_norm'].values, width=0.6, color='gray',
             alpha=0.35, edgecolor='gray', linewidth=1)
     ax1.set_ylabel('Frecuencia relativa (%)', fontsize=9)
-    ax1.set_xlabel(feature, fontsize=9)
+    #ax1.set_xlabel(feature, fontsize=9)
     ax1.set_xticks(x)
     ax1.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=7)
 
