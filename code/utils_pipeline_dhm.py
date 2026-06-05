@@ -11,6 +11,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 import plotnine as p9
 from plotnine import ggplot
+import numpy as np
+import pandas as pd
+import plotnine as p9
+
 
 
 # ── Custom transformers ──
@@ -154,72 +158,82 @@ def evaluate(pipe, X_train, y_train, cv):
 
 # ── Plotting functions ──
 
-def plot_confusion_matrix(cm, title=None, fig_size=(4, 3)):
-    """Heatmap de matriz de confusion con counts y % fila."""
+def plot_confusion_matrix(cm,size, title=None):
+    """
+    Confusion matrix heatmap using plotnine.
+    Shows counts and row percentages.
+    """
     n = cm.shape[0]
+
     row_sums = cm.sum(axis=1, keepdims=True)
     cm_pct = np.where(row_sums > 0, cm / row_sums * 100, 0)
 
-    fig, ax = plt.subplots(figsize=fig_size)
-    cmap = np.full((n, n, 4), [0.8, 0.2, 0.2, 0.25], dtype=float)
-    for i in range(n):
-        cmap[i, i] = [0.2, 0.6, 0.2, 0.25]
-    ax.imshow(cmap)
+    data = []
     for i in range(n):
         for j in range(n):
-            ax.text(j, i, f'{cm[i, j]}\n({cm_pct[i, j]:.1f}%)',
-                    ha='center', va='center', fontsize=10, fontweight='bold')
-    ax.set_xticks(range(n))
-    ax.set_yticks(range(n))
-    ax.set_xticklabels(['Pred: 0', 'Pred: 1'])
-    ax.set_yticklabels(['Actual 0', 'Actual 1'])
-    ax.set_xlabel('Prediccion', fontsize=9)
-    ax.set_ylabel('Real', fontsize=9)
-    if title:
-        ax.set_title(title, fontsize=10, fontweight='bold')
-    fig.tight_layout()
-    return fig
+            data.append({
+                "Actual": f"Actual {i}",
+                "Predicted": f"Pred: {j}",
+                "Count": cm[i, j],
+                "Pct": cm_pct[i, j],
+                "Diagonal": "Correct" if i == j else "Incorrect",
+                "Label": f"{cm[i, j]}\n({cm_pct[i, j]:.1f}%)"
+            })
 
+    df = pd.DataFrame(data)
 
-def plot_elbow(be_df, optimal_n, fig_size=(6, 4)):
-    """Linea de PR-AUC vs n_features con marcador en el codo."""
-    df = be_df.copy()
-    line_col = 'steelblue'
+    # Map pct to alpha: scale within [0.15, 0.9] so even 0% tiles are visible
+    df["Alpha"] = 0.1 + (df["Pct"] / 100) * 0.9
 
-    if 'pr_val' not in df.columns:
-        df['pr_val'] = df['pr_auc'].str.extract(r'([\d.]+)').astype(float)
-    p = (
-        p9.ggplot(df, p9.aes(x='n_features', y='pr_val'))
-        + p9.geom_line(color=line_col, size=0.8)
-        + p9.geom_point(color=line_col, size=2)
-        + p9.geom_point(
-            data=df[df['n_features'] == optimal_n],
-            mapping=p9.aes(x='n_features', y='pr_val'),
-            color='red', size=3.5
+    # Build per-row fill color using base colors + alpha baked in
+    import matplotlib.colors as mcolors
+
+    def make_color(row):
+        base = "seagreen" if row["Diagonal"] == "Correct" else "red"
+        r, g, b = mcolors.to_rgb(base)
+        # Blend with white based on alpha
+        a = row["Alpha"]
+        return f"#{int((r*a + 1*(1-a))*255):02x}{int((g*a + 1*(1-a))*255):02x}{int((b*a + 1*(1-a))*255):02x}"
+
+    df["FillColor"] = df.apply(make_color, axis=1)
+
+    # color_map = dict(zip(df["Label"], df["FillColor"]))  # won't work — use index key
+    # fill_map = {str(i): color for i, color in enumerate(df["FillColor"])}
+
+    df["TileID"] = df.index.astype(str)
+    fill_values = dict(zip(df["TileID"], df["FillColor"]))
+
+    plot = (
+        p9.ggplot(df, p9.aes(x="Predicted", y="Actual"))
+        + p9.geom_tile(
+            p9.aes(fill="TileID"),
+            color="black",
         )
-        + p9.geom_vline(xintercept=optimal_n, linetype='dashed',
-                         color='red', size=0.5)
-        + p9.labs(title='Backward Elimination',
-                  x='Numero de features', y='PR-AUC (CV mean)')
-        + p9.scale_x_continuous(
-            breaks=sorted(df['n_features'].unique()),
-            limits=(df['n_features'].min() - 0.3,
-                    df['n_features'].max() + 0.3)
+        + p9.geom_text(
+            p9.aes(label="Label"),
+            size=8,
+            fontweight="bold"
         )
+        + p9.scale_fill_manual(values=fill_values)
+        + p9.labs(title=title, x=' ', y=' ', fill="")
         + p9.theme(
             panel_background=p9.element_rect(fill="#ffffff"),
             plot_background=p9.element_rect(fill='#ffffff'),
-            panel_grid_major_y=p9.element_line(color="#c0bfbf"),
-            panel_grid_minor_y=p9.element_line(color="#e6e4e4ff"),
-            figure_size=fig_size,
-            axis_text_x=p9.element_text(size=8),
-            axis_text_y=p9.element_text(size=8),
-            axis_title_x=p9.element_text(size=9),
-            axis_title_y=p9.element_text(size=9),
-            plot_title=p9.element_text(size=10, weight="bold"),
+            panel_grid_major_y=p9.element_blank(),
+            panel_grid_minor_y=p9.element_blank(),
+            panel_grid_major_x=p9.element_blank(),
+            panel_grid_minor_x=p9.element_blank(),
+            axis_ticks_major_x=p9.element_blank(),
+            axis_ticks_major_y=p9.element_blank(),
+            figure_size=size,
+            axis_text_x=p9.element_text(size=9, weight="bold", color='black'),
+            axis_text_y=p9.element_text(size=9, weight="bold", color='black'),
+            plot_title=p9.element_text(size=9, weight="bold", margin={"t": 8, "b": 8}),
+            legend_position="none",
         )
     )
-    return p
+
+    return plot
 
 
 def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
