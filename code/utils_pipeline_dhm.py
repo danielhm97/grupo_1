@@ -405,7 +405,7 @@ def iv_variable (data,col,target):
         "Count": data_grouped["Count"].sum(),
         "Non_Event": data_grouped["Non_Event"].sum(),
         "Event": data_grouped["Event"].sum(),
-        "count_%": data_grouped["count_%"].sum(),  # should be 1.0
+        #"count_%": data_grouped["count_%"].sum(),  # should be 1.0
         "event_rate": data_grouped["Event"].sum() / data_grouped["Count"].sum(),
         "IV total": data_grouped["IV"].sum(),
     }
