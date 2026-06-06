@@ -16,6 +16,12 @@ import pandas as pd
 import plotnine as p9
 
 
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import io
+import warnings
+from plotnine.exceptions import PlotnineWarning
+
 
 # ── Custom transformers ──
 class TypeCaster(BaseEstimator, TransformerMixin):
@@ -171,9 +177,11 @@ def plot_confusion_matrix(cm,size, title=None):
     data = []
     for i in range(n):
         for j in range(n):
+            label_x =  "No Diabético" if i == 0 else "Diabético"
+            label_y = "No Diabético" if j == 0 else "Diabético"
             data.append({
-                "Actual": f"Actual {i}",
-                "Predicted": f"Pred: {j}",
+                "Actual": label_x,
+                "Predicted": label_y,
                 "Count": cm[i, j],
                 "Pct": cm_pct[i, j],
                 "Diagonal": "Correct" if i == j else "Incorrect",
@@ -197,8 +205,6 @@ def plot_confusion_matrix(cm,size, title=None):
 
     df["FillColor"] = df.apply(make_color, axis=1)
 
-    # color_map = dict(zip(df["Label"], df["FillColor"]))  # won't work — use index key
-    # fill_map = {str(i): color for i, color in enumerate(df["FillColor"])}
 
     df["TileID"] = df.index.astype(str)
     fill_values = dict(zip(df["TileID"], df["FillColor"]))
@@ -215,7 +221,7 @@ def plot_confusion_matrix(cm,size, title=None):
             fontweight="bold"
         )
         + p9.scale_fill_manual(values=fill_values)
-        + p9.labs(title=title, x=' ', y=' ', fill="")
+        + p9.labs(title=title, x='Predicho', y='Actual', fill="")
         + p9.theme(
             panel_background=p9.element_rect(fill="#ffffff"),
             plot_background=p9.element_rect(fill='#ffffff'),
@@ -226,8 +232,10 @@ def plot_confusion_matrix(cm,size, title=None):
             axis_ticks_major_x=p9.element_blank(),
             axis_ticks_major_y=p9.element_blank(),
             figure_size=size,
-            axis_text_x=p9.element_text(size=9, weight="bold", color='black'),
-            axis_text_y=p9.element_text(size=9, weight="bold", color='black'),
+            #axis_title_y=p9.element_text(margin={"r": 0}),
+            axis_text_x=p9.element_text(size=9, color='black',margin={"t": -2}),
+            axis_text_y=p9.element_text(size=9, color='black', rotation=90, va='center',
+                                        margin={"r": -8}),
             plot_title=p9.element_text(size=9, weight="bold", margin={"t": 8, "b": 8}),
             legend_position="none",
         )
@@ -410,3 +418,82 @@ def iv_variable (data,col,target):
         "IV total": data_grouped["IV"].sum(),
     }
     return summary
+
+
+
+def join_plots(plots,sizes):
+    # Silence the warning when saving into the buffer
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PlotnineWarning)
+
+        # Crear divisiones relativas al ancho de cada plot
+        widths = [s[0] for s in sizes]
+        total_width = sum(widths)
+        total_height = np.array([s[1] for s in sizes]).max()
+
+        fig = plt.figure(figsize=(total_width,total_height), dpi=300)
+        gs = gridspec.GridSpec(1, len(plots), width_ratios=widths, figure=fig)
+
+        for i, p in enumerate(plots):
+            ax = fig.add_subplot(gs[i])
+            buf = io.BytesIO()
+
+            if isinstance(p, ggplot):
+                p.save(buf, format='png', dpi=300)
+                buf.seek(0)
+                img = plt.imread(buf)
+                ax.imshow(img)                   
+            elif isinstance(p,str):
+                ax.text(0.5, 0.5, p, fontsize=10,va='center', ha='center', transform=ax.transAxes)
+
+            ax.axis('off')
+
+        return fig    
+    
+
+# Plot corr matrix
+def corr_plot(data, numeric_var,fig_size,corr_filter=0, title=None):
+    # Calcular matriz de correlación
+    corr_matrix = data[numeric_var].corr()
+    col_order = corr_matrix.columns.tolist()
+
+    if title is None:
+        title = "Correlation Matrix"
+
+    # Creamos una matriz 'mask' para poder quedarnos solo con el triangulo inferior
+    mask = np.zeros_like(corr_matrix, dtype=bool)
+    # Nos quedamos con el triangulo inferior y la diagonal
+    mask[np.triu_indices_from(mask, k=0)] = True
+
+    # Utilizamos mask para filtrar y formateamos la matriz para plotnine
+    corr_matrix = corr_matrix.mask(mask).stack().reset_index(name='value')
+    corr_matrix.columns = ['var1', 'var2', 'value']
+
+    corr_matrix['var1'] = pd.Categorical(corr_matrix['var1'], categories=col_order)
+    corr_matrix['var2'] = pd.Categorical(corr_matrix['var2'], categories=col_order)
+    corr_matrix = corr_matrix[np.abs(corr_matrix['value'])>=corr_filter]
+
+    corr_plot = (
+        p9.ggplot(corr_matrix, p9.aes(x='var1', y='var2', fill='value'))
+        + p9.geom_tile()  # This creates the squares
+        + p9.geom_text(p9.aes(label='value.round(2)'), size=8) # Add coefficients
+        + p9.scale_fill_gradient2(
+            low='#d7191c', 
+            mid='#ffffbf', 
+            high="#05b402", 
+            midpoint=0, 
+            limits=[-1, 1]
+        )
+        + p9.theme_minimal()
+        + p9.theme(
+            axis_text_x=p9.element_text(rotation=45, hjust=1),
+            axis_title=p9.element_blank(),
+            figure_size=fig_size
+        )
+        + p9.labs(title=title, fill="Corr")
+    )
+
+    return corr_plot
+
+
+    
