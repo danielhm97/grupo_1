@@ -6,3 +6,4 @@ informe/
 wandb/
 daniel.py
 AGENTS.md
+__pycache__/

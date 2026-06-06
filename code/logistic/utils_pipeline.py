@@ -1,23 +1,26 @@
+# Manipulación de datos
 import pandas as pd
 import numpy as np
+
+# Pipeline y modelado
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_validate
-import category_encoders as ce
 from optbinning import OptimalBinning
-import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
-import plotnine as p9
-from plotnine import ggplot
-import numpy as np
-import pandas as pd
-import plotnine as p9
+import category_encoders as ce
+from sklearn.model_selection import cross_validate
 
+# Metricas
+from sklearn.metrics import precision_recall_curve, average_precision_score
 
+# Visualizacion
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from plotnine import ggplot
+import plotnine as p9
+
+# Otros
 import io
 import warnings
 from plotnine.exceptions import PlotnineWarning
@@ -189,7 +192,8 @@ def plot_confusion_matrix(cm,size, title=None):
             })
 
     df = pd.DataFrame(data)
-
+    df['Predicted'] = pd.Categorical(df['Predicted'], categories=["No Diabético", "Diabético"], ordered=True)
+    df['Actual'] = pd.Categorical(df['Actual'], categories=["No Diabético", "Diabético"], ordered=True)
     # Map pct to alpha: scale within [0.15, 0.9] so even 0% tiles are visible
     df["Alpha"] = 0.1 + (df["Pct"] / 100) * 0.9
 
@@ -243,8 +247,6 @@ def plot_confusion_matrix(cm,size, title=None):
 
     return plot
 
-import plotnine as p9
-from sklearn.metrics import precision_recall_curve, average_precision_score
 
 def auc_box(X_train, y_train, X_test, y_test, model_pipe):
     aucs = {}
