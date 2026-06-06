@@ -1,9 +1,7 @@
 scoring_demo/
 others/
-code/__pycache__/
 informe/
-.env
 wandb/
 daniel.py
 AGENTS.md
-__pycache__/
+__pycache__
