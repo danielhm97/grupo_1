@@ -310,23 +310,11 @@ def pr_curve_plot(df_plot,
 
 
 
-def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
-                         fig_size=(8, 4)):
-    """Dual-axis: barras (frecuencia) + linea (tasa diabetes) por
-    categoria/bin, ordenado por proporcion de target=1."""  # noqa: E501
-    data = pd.DataFrame({'feature': X_raw[feature].copy(), 'target': y})
-    cfg = column_config.get(feature, {})
-    is_binned = cfg.get('transform') == 'binning'
-
-    if is_binned and preproc is not None and feature in preproc.binners_:
-        binner = preproc.binners_[feature]
-        tbl = binner.binning_table.build()
-        tbl = tbl[tbl['Bin'].astype(str).str.strip() != ''].copy()
-        idx_to_label = {idx: r['Bin'] for idx, r in tbl.iterrows()}
-        bin_indices = binner.transform(data['feature'].values, metric='bins')
-        data['group'] = [idx_to_label.get(i, f'Bin {i}') for i in bin_indices]
-    else:
-        data['group'] = data['feature'].astype(str)
+def plot_feature_profile(feature, data_base, target, fig_size=(8, 4)):
+    """Dual-axis: barras (frecuencia) + linea (tasa target) por
+    categoria, ordenado por proporcion de target=1."""  # noqa: E501
+    data = pd.DataFrame({'feature': data_base[feature].copy(), 'target': target})
+    data['group'] = data['feature'].astype(str)
 
     agg = (
         data.groupby('group', observed=True)
@@ -337,29 +325,58 @@ def plot_feature_profile(feature, X_raw, y, column_config, preproc=None,
     agg = agg.sort_values('prop_diabetes', ascending=True).reset_index(drop=True)
 
     x_labels = agg['group'].tolist()
+
+    if x_labels == ['0', '1']:
+        x_labels = ['No', 'Si']
+        
     x = np.arange(len(agg))
 
-    fig, ax1 = plt.subplots(figsize=fig_size)
-    ax1.bar(x, agg['freq_norm'].values, width=0.6, color='gray',
-            alpha=0.35, edgecolor='gray', linewidth=1)
+    fig, ax1 = plt.subplots(figsize=fig_size, dpi=200)
+    fig.patch.set_facecolor('white')
+    ax1.set_facecolor('white')
+
+    ax1.bar(x, 
+            agg['freq_norm'].values, 
+            width=0.6, 
+            color='steelblue',
+            alpha=0.7, 
+            edgecolor='steelblue', 
+            linewidth=1
+        )
+
     ax1.set_ylabel('Frecuencia relativa (%)', fontsize=9)
-    #ax1.set_xlabel(feature, fontsize=9)
     ax1.set_xticks(x)
-    ax1.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=7)
+
+    if len(x_labels) > 5:
+        ax1.set_xticklabels(x_labels, rotation=45, ha='left', fontsize=7)
+    else:
+        ax1.set_xticklabels(x_labels, rotation=0, ha='center', fontsize=9)
+
+    ax1.spines[['top', 'right']].set_visible(False)
 
     ax2 = ax1.twinx()
-    ax2.plot(x, agg['prop_diabetes'].values * 100, 'o-', color='darkred',
+    ax2.plot(x, agg['prop_diabetes'].values * 100, 'o-', color='red',
              linewidth=1.5, markersize=4, zorder=5)
-    ax2.set_ylabel('Tasa de diabetes (%)', fontsize=9, color='darkred')
-    ax2.tick_params(axis='y', labelcolor='darkred')
+    #ax2.set_ylabel('Tasa de diabetes (%)', fontsize=9, color='red')
+    #ax2.tick_params(axis='y', labelcolor='red')
+    ax2.tick_params(axis='y', right=False, labelright=False)
+    ax2.spines[['top', 'right']].set_visible(False)
 
     for i, v in enumerate(agg['prop_diabetes'].values):
-        ax2.text(i, v * 100 + 1.5, f'{v*100:.1f}%', ha='center', va='bottom',
-                 fontsize=7, color='darkred',
-                 path_effects=[pe.Stroke(linewidth=2, foreground='white'),
-                               pe.Normal()])
+        ax2.annotate(f'{v*100:.1f}%',
+                     xy=(i, v * 100),
+                     xytext=(0, 8),
+                     textcoords='offset points',
+                     ha='center', va='bottom',
+                     fontsize=7, color='black')
 
-    ax1.set_title(feature, fontsize=10, weight='bold')
+    y_lo, y_hi = ax2.get_ylim()
+    ax2.set_ylim(y_lo, y_hi * 1.05)
+
+    ax1.set_title(f'Frecuencia relativa vs Tasa de diabetes\n{feature}',
+                  fontsize=10, 
+                  #weight='bold'
+                )
     ax1.grid(axis='y', alpha=0.3)
     ax1.set_axisbelow(True)
     fig.tight_layout()
